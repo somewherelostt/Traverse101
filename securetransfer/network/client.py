@@ -74,6 +74,7 @@ class TransferClient:
         file_path: str,
         compression_level: int = 3,
         progress_callback: Callable[[str, int, int], None] | None = None,
+        corrupt_piece_index: int | None = None,
     ) -> dict[str, Any]:
         """Full client-side session: handshake, manifest, send pieces (compress then encrypt), complete.
 
@@ -151,10 +152,13 @@ class TransferClient:
             for piece in chunker.iter_pieces():
                 piece_index = piece["piece_index"]
                 piece_data = b"".join(b["block_data"] for b in piece["blocks"])
-                compressed = compressor.compress(piece_data)
-                encrypted = aes_cipher.encrypt(compressed)
-                piece_pkt = PacketBuilder.build_piece(piece_index, encrypted, wire_transfer_id)
                 for attempt in range(MAX_PIECE_RETRIES + 1):
+                    to_compress = piece_data
+                    if corrupt_piece_index is not None and piece_index == corrupt_piece_index and attempt == 0:
+                        to_compress = b"\x00" * len(piece_data)
+                    compressed = compressor.compress(to_compress)
+                    encrypted = aes_cipher.encrypt(compressed)
+                    piece_pkt = PacketBuilder.build_piece(piece_index, encrypted, wire_transfer_id)
                     await self._send_packet(writer, piece_pkt, write_lock)
                     logger.debug("sent PIECE index={} size={}", piece_index, len(encrypted))
                     reply = await asyncio.wait_for(

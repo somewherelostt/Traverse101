@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -25,6 +26,12 @@ async_engine = create_async_engine(
     DATABASE_URL,
     echo=False,
 )
+
+
+@event.listens_for(async_engine.sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    """Enable WAL for better concurrent read/write (e.g. server + client in tests)."""
+    dbapi_conn.execute("PRAGMA journal_mode=WAL")
 
 AsyncSessionLocal = async_sessionmaker(
     bind=async_engine,

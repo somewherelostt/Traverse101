@@ -153,6 +153,23 @@ class TransferRepository:
         )
         return result.scalar_one_or_none()
 
+    async def list_transfers(
+        self,
+        direction: str | None = None,
+        filename: str | None = None,
+        limit: int = 10,
+    ) -> list[Transfer]:
+        """Return recent transfers, optionally filtered by direction and/or filename."""
+        from sqlalchemy import select
+
+        q = select(Transfer).order_by(Transfer.created_at.desc()).limit(limit)
+        if direction is not None:
+            q = q.where(Transfer.direction == direction)
+        if filename is not None:
+            q = q.where(Transfer.filename == filename)
+        result = await self._session.execute(q)
+        return list(result.scalars().all())
+
     async def update_transfer_status(self, transfer_id: str, status: str) -> None:
         """Update the status of a transfer.
 
@@ -260,3 +277,7 @@ class TransferRepository:
             .values(attempts=PieceStatus.attempts + 1)
         )
         logger.debug("increment_piece_attempts: {} piece {}", transfer_id, piece_index)
+
+    async def commit(self) -> None:
+        """Commit the current transaction (e.g. to release SQLite lock for another connection)."""
+        await self._session.commit()
