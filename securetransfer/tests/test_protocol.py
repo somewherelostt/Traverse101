@@ -6,6 +6,8 @@ import struct
 import pytest
 
 from securetransfer.core.protocol import (
+    HEADER_FORMAT,
+    HEADER_SIZE,
     MAGIC,
     VERSION,
     FrameReader,
@@ -143,5 +145,25 @@ def test_frame_reader_with_simulated_stream() -> None:
         r2 = await FrameReader.read_packet(reader2)
         assert r1.payload == b"ping"
         assert r2.payload == b"pong"
+
+    asyncio.run(_run())
+
+
+def test_frame_reader_rejects_oversized_payload() -> None:
+    """read_packet with max_payload_size rejects payload_len > max (validate packet fields)."""
+    async def _run() -> None:
+        # Header only: payload_len = 1_000_000, no payload bytes provided
+        header = struct.pack(
+            HEADER_FORMAT,
+            MAGIC,
+            VERSION,
+            int(PacketType.MANIFEST),
+            0,
+            1_000_000,  # payload_len
+            0,
+        )
+        reader = _MockStreamReader(header)
+        with pytest.raises(PacketParseError, match="exceeds maximum"):
+            await FrameReader.read_packet(reader, max_payload_size=64 * 1024)
 
     asyncio.run(_run())

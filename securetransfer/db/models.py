@@ -53,6 +53,22 @@ class Transfer(Base):
     )
 
 
+class AuditLog(Base):
+    """Audit trail: connections, handshakes, transfers, errors, bans."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    transfer_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    remote_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    message: Mapped[str] = mapped_column(String(1024), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)  # info, warning, error
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class PieceStatus(Base):
     """Tracks which pieces have been confirmed received/sent."""
 
@@ -281,3 +297,23 @@ class TransferRepository:
     async def commit(self) -> None:
         """Commit the current transaction (e.g. to release SQLite lock for another connection)."""
         await self._session.commit()
+
+    async def add_audit_log(
+        self,
+        event_type: str,
+        message: str,
+        severity: str = "info",
+        transfer_id: str | None = None,
+        remote_ip: str | None = None,
+    ) -> None:
+        """Append an audit log entry (connections, handshakes, transfers, errors, bans)."""
+        entry = AuditLog(
+            event_type=event_type,
+            transfer_id=transfer_id,
+            remote_ip=remote_ip,
+            message=message,
+            severity=severity,
+        )
+        self._session.add(entry)
+        await self._session.flush()
+        logger.debug("audit: {} {} {}", event_type, severity, message[:80])

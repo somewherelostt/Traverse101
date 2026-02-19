@@ -1,0 +1,19 @@
+services:
+  securetransfer-server:
+    build: .
+    ports:
+      - "9000:9000"
+    volumes:
+      - received_data:/app/received
+      - server_logs:/app/logs
+      - server_data:/app/data
+    environment:
+      - ST_HOST=0.0.0.0
+      - ST_PORT=9000
+      - ST_LOG_PATH=/app/logs/securetransfer.log
+      - DB_PATH=/app/data/securetransfer.db
+
+volumes:
+  received_data:
+  server_logs:
+  server_data:

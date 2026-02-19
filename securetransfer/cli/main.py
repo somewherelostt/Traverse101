@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from securetransfer import config
 from securetransfer.core.chunker import FileChunker
 from securetransfer.db.models import TransferRepository
 from securetransfer.db.session import get_session, init_db
@@ -132,6 +133,11 @@ def send_cmd(host: str, port: int, file_path: Path, compression_level: int) -> N
 @click.option("--output-dir", default=".", type=click.Path(path_type=Path), help="Where to save received files")
 def receive_cmd(host: str, port: int, output_dir: Path) -> None:
     """Start server and receive files."""
+    try:
+        config.validate()
+    except config.ConfigError as e:
+        raise click.BadParameter(str(e)) from e
+    config.configure_logging()
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 

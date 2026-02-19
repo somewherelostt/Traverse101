@@ -1,8 +1,13 @@
 """Encryption module using AES-256-GCM and X25519.
 
-CRITICAL: Compress BEFORE encrypting. Call compression first, then pass
-the compressed data to encryption. Never reuse a nonce; always authenticate
-before using decrypted data (GCM tag verification is automatic).
+CRIME attack prevention: Compress BEFORE encrypting on the whole payload.
+Call compression first, then pass the compressed data to encryption so
+ciphertext does not leak plaintext structure via compression side channels.
+
+Nonce reuse prevention: Each encrypt() uses a fresh 12-byte random nonce;
+never reuse a nonce with the same key. GCM tag verification is automatic on decrypt.
+Sensitive bytes (shared secrets, AES keys) should be zeroed after use via
+securetransfer.core.security.zero_out_sensitive(bytearray(buf)).
 """
 
 from __future__ import annotations
@@ -73,7 +78,7 @@ class KeyManager:
 
     def derive_shared_secret(
         self,
-        private_key_bytes: bytes,
+        private_key_bytes: bytes | bytearray,
         peer_public_key_bytes: bytes,
     ) -> bytes:
         """Compute X25519 ECDH shared secret.

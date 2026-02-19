@@ -243,11 +243,18 @@ class FrameReader:
     """Read full packets from an asyncio stream, handling TCP fragmentation."""
 
     @staticmethod
-    async def read_packet(reader: asyncio.StreamReader) -> Packet:
+    async def read_packet(
+        reader: asyncio.StreamReader,
+        max_payload_size: int | None = None,
+    ) -> Packet:
         """Read one packet: 20-byte header, then payload_length bytes.
+
+        Validate all incoming packet fields: no negative sizes, no oversized
+        payloads (when max_payload_size is set).
 
         Args:
             reader: Asyncio stream reader (e.g. from asyncio.open_connection).
+            max_payload_size: If set, reject payload_len > this (prevents memory exhaustion).
 
         Returns:
             Parsed Packet.
@@ -255,7 +262,7 @@ class FrameReader:
         Raises:
             InvalidMagicError: If magic in header is wrong.
             VersionMismatchError: If version in header is wrong.
-            PacketParseError: If stream ends prematurely or parse fails.
+            PacketParseError: If stream ends prematurely, parse fails, or payload too large.
         """
         header = await reader.readexactly(HEADER_SIZE)
         if len(header) != HEADER_SIZE:
@@ -270,6 +277,13 @@ class FrameReader:
         if version != VERSION:
             raise VersionMismatchError(
                 f"Version mismatch: expected {VERSION}, got {version}"
+            )
+        # Validate payload size: no negative (unsigned), no oversized payloads
+        if payload_len < 0:
+            raise PacketParseError("Invalid payload length: negative")
+        if max_payload_size is not None and payload_len > max_payload_size:
+            raise PacketParseError(
+                f"Payload length {payload_len} exceeds maximum {max_payload_size}"
             )
         payload = await reader.readexactly(payload_len)
         return Packet.from_bytes(header + payload)
