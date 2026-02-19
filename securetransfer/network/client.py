@@ -6,7 +6,7 @@ import asyncio
 import base64
 import json
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
@@ -69,17 +69,24 @@ class TransferClient:
             packet.payload_length,
         )
 
-    async def send_file(self, file_path: str) -> dict[str, Any]:
+    async def send_file(
+        self,
+        file_path: str,
+        compression_level: int = 3,
+        progress_callback: Callable[[str, int, int], None] | None = None,
+    ) -> dict[str, Any]:
         """Full client-side session: handshake, manifest, send pieces (compress then encrypt), complete.
 
         Args:
             file_path: Path to the file to send.
+            compression_level: Zstd level 1-22 (default 3).
+            progress_callback: Optional (transfer_id, completed_pieces, total_pieces) after each ACK.
 
         Returns:
             Transfer summary dict (e.g. transfer_id, filename, status, total_pieces).
         """
         key_manager = KeyManager()
-        compressor = Compressor()
+        compressor = Compressor(level=compression_level)
         write_lock = asyncio.Lock()
         transfer_id_str = ""
         wire_transfer_id = 0
@@ -156,6 +163,8 @@ class TransferClient:
                     )
                     if reply.packet_type == PacketType.PIECE_ACK:
                         await self._db_repo.mark_piece_verified(transfer_id_str, piece_index)
+                        if progress_callback:
+                            progress_callback(transfer_id_str, piece_index + 1, total_pieces)
                         break
                     if reply.packet_type == PacketType.PIECE_NACK:
                         await self._db_repo.increment_piece_attempts(transfer_id_str, piece_index)

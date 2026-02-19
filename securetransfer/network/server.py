@@ -6,9 +6,11 @@ import asyncio
 import base64
 import hashlib
 import json
+import shutil
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Callable
 
 from loguru import logger
 
@@ -39,6 +41,9 @@ class TransferServer:
         host: str,
         port: int,
         db_repo: TransferRepository,
+        output_dir: str | Path | None = None,
+        progress_callback: Callable[[str, str, int, int], None] | None = None,
+        on_complete_callback: Callable[[str, str, str | None, bool], None] | None = None,
     ) -> None:
         """Initialize server with bind address and DB repository.
 
@@ -46,10 +51,16 @@ class TransferServer:
             host: Bind host (e.g. '0.0.0.0').
             port: Bind port.
             db_repo: Repository for creating/updating Transfer and PieceStatus.
+            output_dir: If set, save received files here (filename from manifest).
+            progress_callback: Called with (transfer_id, filename, completed_pieces, total_pieces).
+            on_complete_callback: Called with (transfer_id, filename, save_path or None, verified).
         """
         self._host = host
         self._port = port
         self._db_repo = db_repo
+        self._output_dir = Path(output_dir) if output_dir else None
+        self._progress_cb = progress_callback
+        self._on_complete_cb = on_complete_callback
         self._server: asyncio.Server | None = None
 
     async def start(self) -> None:
@@ -212,6 +223,8 @@ class TransferServer:
 
                 pieces_data[piece_index] = plain
                 await self._db_repo.mark_piece_verified(transfer_id_str, piece_index)
+                if self._progress_cb:
+                    self._progress_cb(transfer_id_str, manifest["filename"], len(pieces_data), total_pieces)
                 ack = PacketBuilder.build_ack(piece_index, wire_transfer_id)
                 await self._send_packet(writer, ack, write_lock)
                 logger.debug("ACK piece {}", piece_index)
@@ -226,17 +239,29 @@ class TransferServer:
                 for i in range(total_pieces):
                     f.write(pieces_data[i])
                 tmp_path = f.name
+            save_path: str | None = None
+            verified = False
             try:
                 from securetransfer.core.chunker import FileChunker
                 chunker = FileChunker(tmp_path)
                 if not chunker.verify_file(tmp_path, manifest["file_hash"]):
                     await self._db_repo.update_transfer_status(transfer_id_str, "failed")
                     _send_error("file hash verification failed")
+                    if self._on_complete_cb:
+                        self._on_complete_cb(transfer_id_str, manifest["filename"], None, False)
                     return
+                verified = True
+                if self._output_dir:
+                    self._output_dir.mkdir(parents=True, exist_ok=True)
+                    out_file = self._output_dir / manifest["filename"]
+                    shutil.copy2(tmp_path, out_file)
+                    save_path = str(out_file.resolve())
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
 
             await self._db_repo.update_transfer_status(transfer_id_str, "completed")
+            if self._on_complete_cb:
+                self._on_complete_cb(transfer_id_str, manifest["filename"], save_path, verified)
             complete_pkt = Packet(PacketType.TRANSFER_COMPLETE, b"{}", transfer_id=wire_transfer_id)
             await self._send_packet(writer, complete_pkt, write_lock)
             logger.info("transfer complete transfer_id={}", transfer_id_str)

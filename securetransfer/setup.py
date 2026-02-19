@@ -12,6 +12,8 @@ setup(
         "click==8.1.7",
         "python-dotenv==1.0.1",
         "loguru==0.7.2",
+        "rich==13.7.1",
+        "tabulate==0.9.0",
     ],
     extras_require={
         "dev": [
